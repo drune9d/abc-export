@@ -2,12 +2,11 @@
 
 # AbcExport
 
-**Export Alembic from Houdini on any license tier, with arbitrary point
-attributes carried along and correct support for changing topology.**
+**Export Alembic from Houdini, with arbitrary point attributes carried
+along and correct support for changing topology.**
 
 ![Platform](https://img.shields.io/badge/platform-macOS-black)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
-![Houdini](https://img.shields.io/badge/houdini-any%20license%20tier-orange)
 
 </div>
 
@@ -15,10 +14,10 @@ attributes carried along and correct support for changing topology.**
 
 ## Overview
 
-AbcExport gets a standard Alembic cache out of Houdini, on any license
-tier, with your custom point attributes (velocity, age, IDs, whatever
-your simulation produces) attached, and handles sequences whose topology
-changes from frame to frame (fracture, fluids, remeshing) correctly.
+AbcExport gets a standard Alembic cache out of Houdini, with your
+custom point attributes (velocity, age, IDs, whatever your simulation
+produces) attached, and handles sequences whose topology changes from
+frame to frame (fracture, fluids, remeshing) correctly.
 
 It's two pieces that work together:
 
@@ -29,14 +28,28 @@ It's two pieces that work together:
   object in your scene, rebuilding the mesh every frame so changing
   topology is always correct.
 
-It works the same way on every Houdini license tier, including Apprentice,
-since the export step never renders anything, so there's nothing for a
-license restriction to interfere with.
+## Disclaimer
+
+AbcExport is an independent, community project. It is not affiliated
+with, endorsed by, or supported by SideFX or the Blender Foundation.
+
+Using Houdini or Blender means you have agreed to that software's own
+license agreement. AbcExport does not modify, waive, or grant any
+rights under those agreements, and using AbcExport does not change what
+your Houdini or Blender license permits. You are solely responsible for
+using Houdini, Blender, and AbcExport in a way that complies with the
+license terms that apply to your specific installation, including any
+restrictions on commercial use tied to your license type. If you are
+unsure whether a particular use is covered by your license, check your
+license agreement or ask the vendor.
+
+AbcExport itself is free software, licensed under GPL-3.0-or-later (see
+[License](#license) below), provided with no warranty of any kind.
 
 ## Requirements
 
 - macOS
-- Houdini, any edition (built and tested against 21.0)
+- Houdini (built and tested against 21.0)
 - Blender 4.0 or newer (built and tested against 5.2)
 - [Homebrew](https://brew.sh), to build the Alembic converter used by the
   Houdini plugin
@@ -105,8 +118,7 @@ license restriction to interfere with.
 
 ## Requirements and supported versions
 
-- Tested against Houdini 21.0.729 (all license tiers, including Apprentice)
-  and Blender 5.2.
+- Tested against Houdini 21.0.729 and Blender 5.2.
 - String and array point attributes aren't exported: only plain numeric
   ones (float/int, any component count).
 - 4-component attributes (a quaternion, say) land in Blender as a
@@ -194,9 +206,8 @@ frames from before it appeared are zero-filled so the channel stays
 aligned across the whole sequence.
 
 If your scene relies on any of the above, this isn't a drop-in substitute
-for a native Alembic ROP export: it's specifically for getting polygon
-meshes with point-attribute data out under a license tier that can't write
-Alembic directly.
+for a native Alembic ROP export: it's meant for getting a polygon mesh,
+with point-attribute data, into Alembic through an external converter.
 
 ## Troubleshooting
 
