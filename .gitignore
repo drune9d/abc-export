@@ -1,0 +1,7 @@
+build/
+bin/
+dist/
+*.o
+.DS_Store
+__pycache__/
+houdini/backup/
