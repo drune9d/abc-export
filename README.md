@@ -5,7 +5,7 @@
 **Export Alembic from Houdini, with arbitrary point attributes carried
 along and correct support for changing topology.**
 
-![Platform](https://img.shields.io/badge/platform-macOS-black)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-black)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 
 </div>
@@ -48,11 +48,13 @@ AbcExport itself is free software, licensed under GPL-3.0-or-later (see
 
 ## Requirements
 
-- macOS
+- macOS or Windows
 - Houdini (built and tested against 21.0)
 - Blender 4.0 or newer (built and tested against 5.2)
-- [Homebrew](https://brew.sh), to build the Alembic converter used by the
-  Houdini plugin
+- macOS: [Homebrew](https://brew.sh), to build the Alembic converter used
+  by the Houdini plugin
+- Windows: Visual Studio C++ build tools and CMake. The converter links
+  against the Alembic libraries that ship with Houdini.
 
 ## Installing the Blender add-on
 
@@ -66,15 +68,28 @@ AbcExport itself is free software, licensed under GPL-3.0-or-later (see
 
 ## Installing the Houdini plugin
 
-1. Download **`abcexport-houdini-plugin.zip`** from
-   [Releases](../../releases) and unzip it.
+1. Download the Houdini plugin zip from [Releases](../../releases) and
+   unzip it:
+   - macOS: **`abcexport-houdini-plugin.zip`**
+   - Windows: **`abcexport-houdini-plugin-windows.zip`**
 2. Build the converter it depends on:
+   macOS:
    ```bash
    cd abcexport-houdini-plugin/converter
    ./build.sh
    ```
    This installs `alembic`, `hdf5`, `imath`, and `zlib` via Homebrew if you
    don't already have them.
+   Windows:
+   ```bat
+   cd abcexport-houdini-plugin\converter
+   build.bat
+   ```
+   This uses the newest Houdini install it can find. To build against a
+   specific version, pass that install folder:
+   ```bat
+   build.bat "C:\Program Files\Side Effects Software\Houdini 21.0.700"
+   ```
 3. In Houdini: **File → Import → Houdini Digital Asset**, choose
    `abc_export.1.0.hda` from the unzipped folder. Install it for the
    current session, or into your asset library directory so it's always
