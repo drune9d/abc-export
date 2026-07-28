@@ -56,8 +56,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if exist "%ROOT_DIR%\build" rmdir /s /q "%ROOT_DIR%\build"
-mkdir "%ROOT_DIR%\build"
+if not exist "%ROOT_DIR%\build" mkdir "%ROOT_DIR%\build"
 
 "%CMAKE_EXE%" -S "%ROOT_DIR%" -B "%ROOT_DIR%\build" -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DHOUDINI_ROOT="%HOUDINI_ROOT%"
 if errorlevel 1 exit /b 1

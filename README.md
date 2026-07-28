@@ -145,11 +145,14 @@ AbcExport itself is free software, licensed under GPL-3.0-or-later (see
 
 The Houdini side writes a small custom binary mesh format (`.mesh`,
 positions/topology/UV/normal/color as raw floats via `struct.pack`)
-instead of a text interchange format. Face topology specifically (which point each face
-corner belongs to) isn't available as a single bulk call on Houdini's
-geometry API, so two small internal helper wrangles bake it into real
-attributes first; reading that via a bulk attribute call is roughly 90x
-faster than walking the geometry's primitives one at a time in Python.
+instead of a text interchange format. Attribute sidecars are packed into
+indexed files before conversion, which keeps Windows exports from spending
+so much time opening thousands of tiny files. Face topology specifically
+(which point each face corner belongs to) isn't available as a single bulk
+call on Houdini's geometry API, so two small internal helper wrangles bake
+it into real attributes first; reading that via a bulk attribute call is
+roughly 90x faster than walking the geometry's primitives one at a time in
+Python.
 End to end, on a 20-frame, ~340k-point fracture sequence, this runs in
 about 20 seconds versus roughly 53 for the same sequence through a text
 format: about 2.6x faster overall.

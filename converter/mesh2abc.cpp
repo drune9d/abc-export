@@ -82,10 +82,37 @@ struct AttributeSpec
 {
 	std::string name;
 	size_t components = 0;
-	std::vector<std::string> files;   // parallel to the main frame file list
+	struct FrameRef
+	{
+		std::string path;
+		uint32_t elementCount = 0;
+		uint64_t offset = 0;
+		uint64_t byteCount = 0;
+		bool packed = false;
+	};
+	std::vector<FrameRef> frames;   // parallel to the main frame file list
 };
 
 static constexpr char kAttrMagic[4] = { 'A', 'T', 'R', '1' };
+static constexpr char kAttrPackMagic[4] = { 'A', 'P', 'K', '2' };
+
+static bool ReadU16(std::ifstream& file, uint16_t& out)
+{
+	file.read(reinterpret_cast<char*>(&out), sizeof(out));
+	return (bool)file;
+}
+
+static bool ReadU32(std::ifstream& file, uint32_t& out)
+{
+	file.read(reinterpret_cast<char*>(&out), sizeof(out));
+	return (bool)file;
+}
+
+static bool ReadU64(std::ifstream& file, uint64_t& out)
+{
+	file.read(reinterpret_cast<char*>(&out), sizeof(out));
+	return (bool)file;
+}
 
 // Peeks just the header of one .attr file to learn its component count.
 static bool ReadAttributeHeader(const std::string& path, size_t& outPointCount, size_t& outComponents)
@@ -110,10 +137,21 @@ static bool ReadAttributeHeader(const std::string& path, size_t& outPointCount, 
 // Reads one full .attr file's payload into a flat, interleaved float buffer.
 // Returns false (leaving outFlat untouched) on any mismatch, so the caller
 // can zero-fill rather than write misaligned data into the Alembic sample.
-static bool ReadAttributeFrame(const std::string& path, size_t expectedComponents, std::vector<float>& outFlat)
+static bool ReadAttributeFrame(const AttributeSpec::FrameRef& ref, size_t expectedComponents, std::vector<float>& outFlat)
 {
-	std::ifstream file(path, std::ios::binary);
+	std::ifstream file(ref.path, std::ios::binary);
 	if (!file.is_open()) return false;
+
+	if (ref.packed) {
+		if (ref.byteCount % sizeof(float) != 0) return false;
+		const size_t valueCount = static_cast<size_t>(ref.byteCount / sizeof(float));
+		if (expectedComponents == 0 || valueCount != static_cast<size_t>(ref.elementCount) * expectedComponents)
+			return false;
+		outFlat.assign(valueCount, 0.0f);
+		file.seekg(static_cast<std::streamoff>(ref.offset), std::ios::beg);
+		file.read(reinterpret_cast<char*>(outFlat.data()), static_cast<std::streamsize>(ref.byteCount));
+		return (bool)file;
+	}
 
 	char magic[4];
 	file.read(magic, 4);
@@ -173,8 +211,62 @@ static std::vector<AttributeSpec> DiscoverAttributes(const std::string& attrsDir
 		}
 
 		spec.components = components;
-		for (const auto& f : files) spec.files.push_back(f.string());
+		for (const auto& f : files) {
+			AttributeSpec::FrameRef ref;
+			ref.path = f.string();
+			spec.frames.push_back(std::move(ref));
+		}
 		specs.push_back(std::move(spec));
+	}
+
+	return specs;
+}
+
+static std::vector<AttributeSpec> DiscoverPackedAttributes(const std::string& packPath)
+{
+	std::vector<AttributeSpec> specs;
+	if (packPath.empty() || !fs::is_regular_file(packPath))
+		return specs;
+
+	std::ifstream file(packPath, std::ios::binary);
+	if (!file.is_open()) return specs;
+
+	char magic[4];
+	file.read(magic, 4);
+	if (!file || std::memcmp(magic, kAttrPackMagic, 4) != 0) {
+		std::cerr << "Warning: bad .attrpack magic in " << packPath << std::endl;
+		return specs;
+	}
+
+	uint32_t attrCount = 0, frameCount = 0;
+	if (!ReadU32(file, attrCount) || !ReadU32(file, frameCount))
+		return specs;
+
+	specs.reserve(attrCount);
+	for (uint32_t a = 0; a < attrCount; ++a) {
+		uint16_t nameLen = 0;
+		uint32_t components = 0;
+		if (!ReadU16(file, nameLen) || !ReadU32(file, components) || nameLen == 0 || components == 0)
+			return {};
+
+		AttributeSpec spec;
+		spec.name.assign(nameLen, '\0');
+		file.read(&spec.name[0], nameLen);
+		if (!file) return {};
+		spec.components = components;
+		spec.frames.resize(frameCount);
+		specs.push_back(std::move(spec));
+	}
+
+	for (uint32_t a = 0; a < attrCount; ++a) {
+		for (uint32_t f = 0; f < frameCount; ++f) {
+			AttributeSpec::FrameRef ref;
+			ref.path = packPath;
+			ref.packed = true;
+			if (!ReadU32(file, ref.elementCount) || !ReadU64(file, ref.offset) || !ReadU64(file, ref.byteCount))
+				return {};
+			specs[a].frames[f] = std::move(ref);
+		}
 	}
 
 	return specs;
@@ -221,9 +313,9 @@ static void ReadNamedAttributeSidecars(const std::vector<AttributeSpec>& specs, 
 	out.resize(specs.size());
 	for (size_t i = 0; i < specs.size(); ++i) {
 		const AttributeSpec& spec = specs[i];
-		if (frameIndex >= spec.files.size()) continue;
+		if (frameIndex >= spec.frames.size()) continue;
 		std::vector<float> flat;
-		if (ReadAttributeFrame(spec.files[frameIndex], spec.components, flat)) {
+		if (ReadAttributeFrame(spec.frames[frameIndex], spec.components, flat)) {
 			out[i] = std::move(flat);
 		} else {
 			std::cerr << "Warning: could not read attribute '" << spec.name
@@ -339,6 +431,8 @@ struct ConvertOptions
 	bool writeColors = false;
 	std::string attrsDir;
 	std::string attrsFvDir;
+	std::string attrsPack;
+	std::string attrsFvPack;
 };
 
 // Reads every frame in opt.inputDir and writes the finished Alembic cache.
@@ -354,12 +448,14 @@ static bool ConvertSequence(const ConvertOptions& opt)
 	const int totalFrames = static_cast<int>(files.size());
 	std::cout << "Found " << totalFrames << " frame file(s) in: " << opt.inputDir << std::endl;
 
-	std::vector<AttributeSpec> attributeSpecs = DiscoverAttributes(opt.attrsDir);
+	std::vector<AttributeSpec> attributeSpecs = !opt.attrsPack.empty()
+		? DiscoverPackedAttributes(opt.attrsPack)
+		: DiscoverAttributes(opt.attrsDir);
 	for (const auto& spec : attributeSpecs) {
 		std::cout << "Attribute '" << spec.name << "': " << spec.components
-			<< " component(s), " << spec.files.size() << " frame(s) found" << std::endl;
-		if (spec.files.size() != (size_t)totalFrames) {
-			std::cerr << "Warning: attribute '" << spec.name << "' has " << spec.files.size()
+			<< " component(s), " << spec.frames.size() << " frame(s) found" << std::endl;
+		if (spec.frames.size() != (size_t)totalFrames) {
+			std::cerr << "Warning: attribute '" << spec.name << "' has " << spec.frames.size()
 				<< " frame(s) but the sequence has " << totalFrames
 				<< "; extra/missing frames will be zero-filled." << std::endl;
 		}
@@ -369,12 +465,14 @@ static bool ConvertSequence(const ConvertOptions& opt)
 	// face-varying (per face-corner) data -- a second/third UV set, or any
 	// other custom vertex-class attribute -- written to Alembic with
 	// kFacevaryingScope instead of kVertexScope.
-	std::vector<AttributeSpec> fvAttributeSpecs = DiscoverAttributes(opt.attrsFvDir);
+	std::vector<AttributeSpec> fvAttributeSpecs = !opt.attrsFvPack.empty()
+		? DiscoverPackedAttributes(opt.attrsFvPack)
+		: DiscoverAttributes(opt.attrsFvDir);
 	for (const auto& spec : fvAttributeSpecs) {
 		std::cout << "Face-varying attribute '" << spec.name << "': " << spec.components
-			<< " component(s), " << spec.files.size() << " frame(s) found" << std::endl;
-		if (spec.files.size() != (size_t)totalFrames) {
-			std::cerr << "Warning: face-varying attribute '" << spec.name << "' has " << spec.files.size()
+			<< " component(s), " << spec.frames.size() << " frame(s) found" << std::endl;
+		if (spec.frames.size() != (size_t)totalFrames) {
+			std::cerr << "Warning: face-varying attribute '" << spec.name << "' has " << spec.frames.size()
 				<< " frame(s) but the sequence has " << totalFrames
 				<< "; extra/missing frames will be zero-filled." << std::endl;
 		}
@@ -575,6 +673,8 @@ static void PrintUsage(const char* name)
 		"  --colors <0|1>        write vertex colors when present (default 0)\n"
 		"  --attrs-dir <dir>     named point-attribute sidecar directory\n"
 		"  --attrs-fv-dir <dir>  named face-varying attribute sidecar directory\n"
+		"  --attrs-pack <file>   packed point-attribute sidecar file\n"
+		"  --attrs-fv-pack <file> packed face-varying attribute sidecar file\n"
 		"  -h, --help            this text\n"
 		<< std::endl;
 }
@@ -604,6 +704,8 @@ int main(int argc, char* argv[])
 		else if (arg == "--colors") opt.writeColors = std::stoi(nextValue(i)) != 0;
 		else if (arg == "--attrs-dir") opt.attrsDir = nextValue(i);
 		else if (arg == "--attrs-fv-dir") opt.attrsFvDir = nextValue(i);
+		else if (arg == "--attrs-pack") opt.attrsPack = nextValue(i);
+		else if (arg == "--attrs-fv-pack") opt.attrsFvPack = nextValue(i);
 		else {
 			std::cerr << "Unknown option: " << arg << std::endl;
 			PrintUsage(argv[0]);
@@ -625,6 +727,10 @@ int main(int argc, char* argv[])
 		std::cout << "attrs dir: " << opt.attrsDir << std::endl;
 	if (!opt.attrsFvDir.empty())
 		std::cout << "attrs-fv dir: " << opt.attrsFvDir << std::endl;
+	if (!opt.attrsPack.empty())
+		std::cout << "attrs pack: " << opt.attrsPack << std::endl;
+	if (!opt.attrsFvPack.empty())
+		std::cout << "attrs-fv pack: " << opt.attrsFvPack << std::endl;
 
 	return ConvertSequence(opt) ? 0 : 1;
 }
